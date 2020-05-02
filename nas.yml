@@ -176,6 +176,10 @@
     when: (wallabag_enabled | default(False))
     tags: wallabag
 
+  - import_tasks: tasks/makemkv.yml
+    when: (makemkv_enabled | default(False))
+    tags: makemkv
+
   - import_tasks: tasks/mosquitto.yml
     when: (mosquitto_enabled | default(False))
     tags: mosquitto
