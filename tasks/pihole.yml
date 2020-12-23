@@ -1,0 +1,90 @@
+
+---
+- name: Pi-hole directories
+  file:
+    path: "{{ item }}"
+    state: directory
+  with_items:
+    - "{{ pihole_data_directory }}/etc/pihole"
+
+# prepare dns resolver
+# https://github.com/pi-hole/docker-pi-hole#installing-on-ubuntu
+- name: Check if dns resolver already prepared
+  shell: cat /etc/systemd/resolved.conf | grep -E "^DNSStubListener=no$"
+  ignore_errors: true
+  check_mode: no
+  register: dns_resolver_check
+
+- name: Disable stub resolver
+  shell: sed -r -i.noPihole 's/#?DNSStubListener=yes/DNSStubListener=no/g' /etc/systemd/resolved.conf
+  when: dns_resolver_check.rc != 0
+
+- name: Backup resolve.conf
+  shell: mv /etc/resolv.conf /etc/resolv.conf.noPihole
+  when: dns_resolver_check.rc != 0
+
+- name: Set new resolve.conf
+  shell: ln -s /run/systemd/resolve/resolv.conf /etc/resolv.conf
+  when: dns_resolver_check.rc != 0
+
+- name: Restart systemd-resolved service
+  systemd:
+    state: restarted
+    daemon_reload: yes
+    name: systemd-resolved
+  when: dns_resolver_check.rc != 0
+
+- name: Pi-hole env (with Traefik enabled)
+  set_fact:
+    pihole_env:
+      DNS1: "{{ pihole_dns1 }}"
+      DNS2: "{{ pihole_dns2 }}"
+      ServerIP: "{{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}"
+      WEBPASSWORD: "{{ pihole_WEBPASSWORD }}"
+      TZ: "{{ ansible_nas_timezone }}"
+      PROXY_LOCATION: "pihole"
+      VIRTUAL_HOST: "pihole.{{ ansible_nas_domain }}"
+      VIRTUAL_PORT: "80"
+  when: pihole_available_externally == 'true'
+
+- name: Pi-hole env (with Traefik disabled)
+  set_fact:
+    pihole_env:
+      DNS1: "{{ pihole_dns1 }}"
+      DNS2: "{{ pihole_dns2 }}"
+      ServerIP: "{{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}"
+      WEBPASSWORD: "{{ pihole_WEBPASSWORD }}"
+      TZ: "{{ ansible_nas_timezone }}"
+  when: pihole_available_externally == 'false'
+
+- name: Pi-hole Docker Container
+  docker_container:
+    name: pihole
+    image: pihole/pihole:latest
+    pull: false
+    volumes:
+      - "{{ pihole_data_directory }}/etc/pihole:/etc/pihole:rw"
+      - "{{ pihole_data_directory }}/etc/dnsmasq.d:/etc/dnsmasq.d:rw"
+    ports:
+      - "53:53/tcp"
+      - "53:53/udp"
+      - "8182:80"
+      - "8183:443"
+    env: "{{ pihole_env }}"
+    restart_policy: unless-stopped
+    labels:
+      traefik.enable: "{{ pihole_available_externally }}"
+      traefik.backend: "pihole"
+      traefik.port: "80"
+      traefik.frontend.rule: "HostRegexp:pihole.{{ ansible_nas_domain }},{catchall:.*}"
+      traefik.frontend.priority: "1"
+      traefik.frontend.headers.SSLRedirect: "true"
+      traefik.frontend.headers.STSSeconds: "315360000"
+      traefik.frontend.headers.browserXSSFilter: "true"
+      traefik.frontend.headers.contentTypeNosniff: "true"
+      traefik.frontend.headers.forceSTSHeader: "true"
+      traefik.frontend.headers.SSLHost: "{{ ansible_nas_domain }}"
+      traefik.frontend.headers.STSIncludeSubdomains: "true"
+      traefik.frontend.headers.STSPreload: "true"
+      traefik.frontend.headers.frameDeny: "true"
+    memory: 1g
