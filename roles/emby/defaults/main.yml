@@ -23,3 +23,12 @@ emby_hostname: "emby"
 
 # specs
 emby_memory: 1g
+
+# docker
+emby_container_name: emby
+emby_image: emby/embyserver
+emby_image_tag: beta
+
+# Device mappings for the docker container. E.g. To enable hardware transcoding:
+# emby_devices:
+#  - "/dev/dri:/dev/dri"
